@@ -1,11 +1,16 @@
 {
   "id": "excalidraw",
   "name": "Excalidraw notes",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "minAppVersion": "0.4.0",
   "description": "Sketch next to any document. Notes stay with the document, and export as PNG.",
-  "permissions": ["clipboard", "downloads"],
+  "permissions": [
+    "clipboard",
+    "downloads"
+  ],
   "slots": {
-    "artifact.sidePanel": { "title": "Notes" }
+    "artifact.sidePanel": {
+      "title": "Notes"
+    }
   }
 }

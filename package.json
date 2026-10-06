@@ -1,6 +1,6 @@
 {
   "name": "rooms-plugin-excalidraw",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Sketch next to any document with Excalidraw, as an Alto Rooms plugin.",
   "license": "MIT",

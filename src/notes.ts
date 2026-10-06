@@ -60,7 +60,7 @@ interface Storage {
 export class Notes {
   private path: string | null = null;
   private brokenText: string | null = null;
-  private pending: { path: string; text: string } | null = null;
+  private pending: { path: string; serialize: () => string } | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
@@ -79,10 +79,13 @@ export class Notes {
     return r;
   }
 
-  /** A new serialized scene for the open document. Ignored while its notes can't be read. */
-  change(text: string) {
+  /**
+   * The open document's scene changed. `serialize` runs once, when the save is due, not on every
+   * change: Excalidraw reports one per pointer move. Ignored while the notes can't be read.
+   */
+  change(serialize: () => string) {
     if (!this.path || this.brokenText !== null) return;
-    this.pending = { path: this.path, text };
+    this.pending = { path: this.path, serialize };
     if (this.timer) clearTimeout(this.timer);
     this.timer = setTimeout(() => void this.flush(), this.delayMs);
   }
@@ -94,7 +97,7 @@ export class Notes {
     if (!p) return;
     this.pending = null;
     try {
-      await this.storage.write(p.path, p.text);
+      await this.storage.write(p.path, p.serialize());
       this.onFailing(false);
     } catch {
       if (!this.pending) this.pending = p;

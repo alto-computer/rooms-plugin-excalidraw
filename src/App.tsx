@@ -98,7 +98,7 @@ export function App({ rooms }: { rooms: RoomsPlugin }) {
           const v = getSceneVersion(elements);
           if (v === version.current) return; // nothing drawn since the last save or the load
           version.current = v;
-          notes.change(serializeScene({ elements, appState: appState as unknown as Record<string, unknown>, files }));
+          notes.change(() => serializeScene({ elements, appState: appState as unknown as Record<string, unknown>, files }));
         }}
         UIOptions={{
           canvasActions: { loadScene: false, saveToActiveFile: false, export: false, saveAsImage: false, toggleTheme: false },

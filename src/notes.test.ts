@@ -50,11 +50,16 @@ describe("Notes", () => {
     const n = new Notes(s, 400);
     const r = await n.open("k1");
     expect(r.ok && r.scene?.elements).toHaveLength(1);
-    n.change("one");
-    n.change("two");
+    const one = vi.fn(() => "one");
+    const two = vi.fn(() => "two");
+    n.change(one);
+    n.change(two);
     await vi.advanceTimersByTimeAsync(400);
     expect(s.write).toHaveBeenCalledTimes(1);
     expect(s.files["notes/k1.excalidraw"]).toBe("two");
+    // Serialized once, when saved: a change replaced before then never is.
+    expect(one).not.toHaveBeenCalled();
+    expect(two).toHaveBeenCalledTimes(1);
     vi.useRealTimers();
   });
 
@@ -62,10 +67,10 @@ describe("Notes", () => {
     const s = storage();
     const n = new Notes(s, 10_000);
     await n.open("k1");
-    n.change("first doc");
+    n.change(() => "first doc");
     await n.open("k2");
     expect(s.files["notes/k1.excalidraw"]).toBe("first doc");
-    n.change("second doc");
+    n.change(() => "second doc");
     await n.flush();
     expect(s.files["notes/k2.excalidraw"]).toBe("second doc");
   });
@@ -74,12 +79,12 @@ describe("Notes", () => {
     const s = storage({ "notes/k1.excalidraw": "{broken" });
     const n = new Notes(s, 0);
     expect((await n.open("k1")).ok).toBe(false);
-    n.change("blank");
+    n.change(() => "blank");
     await n.flush();
     expect(s.write).not.toHaveBeenCalled();
     await n.startOver();
     expect(Object.entries(s.files).find(([k]) => k.startsWith("notes/k1.broken-"))?.[1]).toBe("{broken");
-    n.change("fresh");
+    n.change(() => "fresh");
     await n.flush();
     expect(s.files["notes/k1.excalidraw"]).toBe("fresh");
   });
@@ -90,7 +95,7 @@ describe("Notes", () => {
     const status = vi.fn();
     const n = new Notes(s, 0, status);
     await n.open("k1");
-    n.change("x");
+    n.change(() => "x");
     await n.flush();
     expect(status).toHaveBeenLastCalledWith(true);
     await n.flush();
