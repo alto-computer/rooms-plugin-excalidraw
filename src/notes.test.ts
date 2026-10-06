@@ -103,3 +103,14 @@ describe("Notes", () => {
     expect(status).toHaveBeenLastCalledWith(false);
   });
 });
+
+describe("ops applied", () => {
+  it("survives a save and a load, and is 0 for notes from before the draw tool", () => {
+    const text = serializeScene({ elements: [rect("a")], appState: {}, files: {}, opsApplied: 3 });
+    const r = parseScene(text);
+    expect(r.ok && r.scene?.opsApplied).toBe(3);
+    expect(JSON.parse(text).rooms).toEqual({ opsApplied: 3 });
+    const old = parseScene(JSON.stringify({ elements: [] }));
+    expect(old.ok && old.scene?.opsApplied).toBe(0);
+  });
+});

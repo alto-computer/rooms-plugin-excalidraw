@@ -5,7 +5,7 @@
     "": {
       "name": "rooms-plugin-excalidraw",
       "dependencies": {
-        "@alto-rooms/plugin-sdk": "https://github.com/alto-computer/alto-rooms/releases/download/plugin-sdk-v0.1.0/alto-rooms-plugin-sdk-0.1.0.tgz",
+        "@alto-rooms/plugin-sdk": "file:../alto-rooms/packages/plugin-sdk",
         "@excalidraw/excalidraw": "^0.18.1",
         "react": "^19.3.0",
         "react-dom": "^19.3.0",
@@ -23,7 +23,7 @@
     },
   },
   "packages": {
-    "@alto-rooms/plugin-sdk": ["@alto-rooms/plugin-sdk@https://github.com/alto-computer/alto-rooms/releases/download/plugin-sdk-v0.1.0/alto-rooms-plugin-sdk-0.1.0.tgz", {}, "sha512-otz63k5mvVezo9c4k4SEGFaHpdrXfsZPZKK6jCaw5Ev25cCn5pypp1gjRE6B8iFio1qeRmV16I1W02DASV5S2A=="],
+    "@alto-rooms/plugin-sdk": ["@alto-rooms/plugin-sdk@file:../alto-rooms/packages/plugin-sdk", { "devDependencies": { "jsdom": "^30.1.2", "typescript": "^7.0.2", "vitest": "^5.0.3" } }],
 
     "@antfu/install-pkg": ["@antfu/install-pkg@2.1.0", "", { "dependencies": { "package-manager-detector": "^1.8.0", "tinyexec": "^1.3.1" } }, "sha512-sdg9NxU3zR4Mnawfbc/x6GB5Wf17WYud5qOuEuxXjaKpYpMkISSJEjItGebXJ2bQ4DIcly4NYH23mtkGJjvKUw=="],
 

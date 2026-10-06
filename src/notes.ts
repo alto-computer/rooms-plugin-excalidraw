@@ -7,6 +7,8 @@ export interface Scene {
   elements: readonly Record<string, unknown>[];
   appState: Record<string, unknown>;
   files: Record<string, unknown>;
+  /** How many lines of the draw tool's ops file are already in `elements` (see ops.ts). */
+  opsApplied: number;
 }
 
 export const notePath = (fileKey: string) => `notes/${fileKey}.excalidraw`;
@@ -29,21 +31,27 @@ export function parseScene(text: string | null): { ok: true; scene: Scene | null
       elements: raw.elements.filter(isObj),
       appState: isObj(raw.appState) ? raw.appState : {},
       files: isObj(raw.files) ? raw.files : {},
+      opsApplied: isObj(raw.rooms) && Number.isInteger(raw.rooms.opsApplied) ? (raw.rooms.opsApplied as number) : 0,
     },
   };
 }
 
-/** What is drawn, as an .excalidraw file: live elements, the images they use, the background. */
+/**
+ * What is drawn, as an .excalidraw file: live elements, the images they use, the background, and
+ * how much of the draw tool's ops file they include (an extra `rooms` key Excalidraw ignores).
+ */
 export function serializeScene(s: {
   elements: readonly unknown[];
   appState: Record<string, unknown>;
   files: Record<string, unknown>;
+  opsApplied?: number;
 }): string {
   const elements = s.elements.filter((e): e is Record<string, unknown> => isObj(e) && e.isDeleted !== true);
   const used = new Set(elements.map((e) => e.fileId).filter((f): f is string => typeof f === "string"));
   const files = Object.fromEntries(Object.entries(s.files).filter(([id]) => used.has(id)));
   const appState = typeof s.appState.viewBackgroundColor === "string" ? { viewBackgroundColor: s.appState.viewBackgroundColor } : {};
-  return JSON.stringify({ type: "excalidraw", version: 2, source: "rooms-plugin-excalidraw", elements, appState, files });
+  const rooms = { opsApplied: s.opsApplied ?? 0 };
+  return JSON.stringify({ type: "excalidraw", version: 2, source: "rooms-plugin-excalidraw", elements, appState, files, rooms });
 }
 
 export function pngName(title: string): string {

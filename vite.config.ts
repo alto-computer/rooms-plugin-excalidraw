@@ -62,5 +62,5 @@ export default defineConfig({
   plugins: [react(), dropFontCdn(), copyFonts(), preloadEarly()],
   define: { "process.env.IS_PREACT": JSON.stringify("false") },
   build: { outDir: "dist", emptyOutDir: true, target: "es2022", modulePreload: { polyfill: false }, chunkSizeWarningLimit: 4000 },
-  test: { environment: "jsdom" },
+  test: { environment: "jsdom", setupFiles: ["src/test-setup.ts"], server: { deps: { inline: ["@excalidraw/excalidraw"] } } },
 });
