@@ -105,9 +105,9 @@ export function App({ rooms }: { rooms: RoomsPlugin }) {
         return;
       }
       const r = step.replayed;
-      opsApplied.current = r.applied;
-      // Excalidraw's onChange saves it, with the new opsApplied.
+      // Excalidraw's onChange saves it, with the new opsApplied; counted only once the scene took it.
       a.updateScene({ elements: r.elements as never, captureUpdate: CaptureUpdateAction.IMMEDIATELY });
+      opsApplied.current = r.applied;
       reveal(a, r.added);
       fadeIn(a, r.added);
       showDrawing();
