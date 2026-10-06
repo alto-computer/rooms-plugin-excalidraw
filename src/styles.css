@@ -1,0 +1,53 @@
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+body {
+  font:
+    14px/1.45 system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    sans-serif;
+  color: #1a1a1a;
+  background: #fff;
+}
+.board,
+.blank {
+  height: 100%;
+}
+.warn {
+  font: inherit;
+  font-size: 13px;
+  height: 36px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+  background: #fbeceb;
+  color: #c4392b;
+}
+.message {
+  padding: 16px;
+}
+.message p:first-child {
+  font-weight: 500;
+  margin: 0 0 4px;
+}
+.muted {
+  color: #8a8a8a;
+  margin: 4px 0;
+}
+.message button {
+  margin-top: 8px;
+  font: inherit;
+  background: none;
+  border: 1px solid #e6e6e6;
+  border-radius: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+.message button:hover {
+  background: #efefef;
+}

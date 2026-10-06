@@ -1,0 +1,30 @@
+{
+  "name": "rooms-plugin-excalidraw",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Sketch next to any document with Excalidraw, as an Alto Rooms plugin.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "vite build --watch",
+    "build": "tsc --noEmit && vite build",
+    "test": "vitest run",
+    "package": "bun run build && cd dist && zip -qr ../excalidraw.zip ."
+  },
+  "dependencies": {
+    "@alto-rooms/plugin-sdk": "https://github.com/alto-computer/alto-rooms/releases/download/plugin-sdk-v0.1.0/alto-rooms-plugin-sdk-0.1.0.tgz",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "@excalidraw/excalidraw": "^0.18.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.4",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "jsdom": "^30.1.2",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.2",
+    "vitest": "^5.0.3"
+  }
+}
