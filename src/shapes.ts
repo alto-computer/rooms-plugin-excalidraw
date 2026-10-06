@@ -62,6 +62,8 @@ export interface EdgeSpec {
 /** Marks what the draw tool made, and remembers what it was made from. */
 export const ROOMS = "rooms";
 export const toolData = (e: El) => e.customData?.[ROOMS] as Record<string, unknown> | undefined;
+/** What an arrow the tool drew was drawn from. */
+export const edgeOf = (e: El) => (toolData(e)?.kind === "edge" ? (toolData(e)!.edge as EdgeSpec) : undefined);
 
 const convert = (skeletons: unknown[]) =>
   (convertToExcalidrawElements(skeletons as never, { regenerateIds: false }) as unknown as El[]).map((e) => ({ ...e, index: null }));
@@ -113,7 +115,8 @@ export function edgeElements(e: EdgeSpec, from: El, to: El): El[] {
       strokeStyle: kind === "dashed" ? "dashed" : "solid",
       startArrowhead: e.startArrowhead ?? null,
       endArrowhead: e.endArrowhead !== undefined ? e.endArrowhead : kind === "line" ? null : "arrow",
-      customData: { [ROOMS]: { kind: "edge", ...e } },
+      // Nested: an edge's own `kind` (arrow, line, dashed) must not shadow the element kind.
+      customData: { [ROOMS]: { kind: "edge", edge: e } },
       ...(e.label ? { label: { text: e.label, fontSize: FONT_SIZE - 4 } } : {}),
     },
   ]);

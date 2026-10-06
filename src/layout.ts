@@ -97,3 +97,18 @@ export function edgeEnds(a: Box, b: Box): { start: [number, number]; end: [numbe
   const right = dx >= 0;
   return { start: [right ? a.x + a.width : a.x, ac[1]], end: [right ? b.x : b.x + b.width, bc[1]] };
 }
+
+/** The part of the scene the board shows: Excalidraw's scroll, zoom and size. */
+export interface View {
+  scrollX: number;
+  scrollY: number;
+  zoom: number;
+  width: number;
+  height: number;
+}
+
+/** Whether any of `boxes` is at least partly on screen. */
+export function inView(boxes: readonly Box[], v: View): boolean {
+  const seen = { x: -v.scrollX, y: -v.scrollY, width: v.width / v.zoom, height: v.height / v.zoom };
+  return boxes.some((b) => overlaps(b, seen, 0));
+}

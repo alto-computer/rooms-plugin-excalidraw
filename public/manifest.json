@@ -102,7 +102,7 @@
                     },
                     "fontSize": {
                       "type": "number",
-                      "minimum": 14
+                      "minimum": 16
                     },
                     "parent": {
                       "type": "string",
@@ -141,7 +141,7 @@
                     },
                     "id": {
                       "type": "string",
-                      "description": "Defaults to '<from>-><to>'."
+                      "description": "Defaults to '<from>-><to>'. Sending an edge again updates it."
                     },
                     "from": {
                       "type": "string",

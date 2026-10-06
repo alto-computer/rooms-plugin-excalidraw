@@ -7,134 +7,13 @@
  * Nodes without x/y are laid out in layers along `direction`, new ones right of what is drawn.
  */
 import { bounds, clear as clearOf, FONT_SIZE, nextLayerSpot, rootSpot, shapeSize, SIBLING_GAP, type Box, type Direction } from "./layout";
-import { edgeElements, frameElement, nodeColors, nodeElements, toolData, type EdgeSpec, type El, type NodeSpec } from "./shapes";
+import { parseOps, type Call, type FrameOp, type NodeOp, type Op } from "./parse";
+import { edgeElements, edgeOf, frameElement, nodeColors, nodeElements, toolData, type EdgeSpec, type El, type NodeSpec } from "./shapes";
 
 export type { El } from "./shapes";
+export { opsPath, parseOps } from "./parse";
 
-export const opsPath = (fileKey: string) => `notes/${fileKey}.ops.jsonl`;
-
-const SHAPES = ["rectangle", "ellipse", "diamond", "text"] as const;
-const STROKES = ["solid", "dashed", "dotted"] as const;
-const EDGE_KINDS = ["arrow", "line", "dashed"] as const;
-const ARROWHEADS = ["arrow", "bar", "dot", "triangle"] as const;
 const FRAME_PAD = 30;
-
-export interface NodeOp {
-  op: "node";
-  id: string;
-  shape?: NodeSpec["shape"];
-  label?: string;
-  color?: string;
-  backgroundColor?: string;
-  strokeColor?: string;
-  strokeStyle?: NodeSpec["strokeStyle"];
-  fontSize?: number;
-  parent?: string;
-  near?: string;
-  x?: number;
-  y?: number;
-  width?: number;
-  height?: number;
-}
-export type EdgeOp = { op: "edge" } & EdgeSpec;
-export interface FrameOp {
-  op: "frame";
-  id: string;
-  name?: string;
-  children?: string[];
-}
-export type Op = NodeOp | EdgeOp | FrameOp | { op: "delete"; ids: string[] } | { op: "clear" };
-
-/** One tool call. */
-export interface Call {
-  ops: Op[];
-  direction: Direction;
-}
-
-const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
-const str = (v: unknown) => (typeof v === "string" && v !== "" ? v : undefined);
-const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
-const oneOf = <T extends string>(list: readonly T[], v: unknown) => (list.includes(v as T) ? (v as T) : undefined);
-const strs = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string" && x !== "") : []);
-/** Drops the keys whose value is undefined, so merging never erases a field with a missing one. */
-const defined = <T extends object>(o: T) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as T;
-
-/** An op as the agent sent it, or null when it can't be used. Cosmetic fields that are wrong are dropped. */
-function toOp(v: unknown): Op | null {
-  if (!isObj(v)) return null;
-  switch (v.op) {
-    case "node": {
-      const id = str(v.id);
-      if (!id) return null;
-      return defined({
-        op: "node" as const,
-        id,
-        shape: oneOf(SHAPES, v.shape),
-        label: typeof v.label === "string" ? v.label : undefined,
-        color: str(v.color),
-        backgroundColor: str(v.backgroundColor),
-        strokeColor: str(v.strokeColor),
-        strokeStyle: oneOf(STROKES, v.strokeStyle),
-        fontSize: num(v.fontSize) !== undefined ? Math.max(14, num(v.fontSize)!) : undefined,
-        parent: str(v.parent),
-        near: str(v.near),
-        x: num(v.x),
-        y: num(v.y),
-        width: num(v.width) !== undefined && num(v.width)! > 0 ? num(v.width) : undefined,
-        height: num(v.height) !== undefined && num(v.height)! > 0 ? num(v.height) : undefined,
-      });
-    }
-    case "edge": {
-      const from = str(v.from);
-      const to = str(v.to);
-      if (!from || !to || from === to) return null;
-      const head = (h: unknown) => (h === null ? null : oneOf(ARROWHEADS, h));
-      return defined({
-        op: "edge" as const,
-        id: str(v.id) ?? `${from}->${to}`,
-        from,
-        to,
-        label: str(v.label),
-        kind: oneOf(EDGE_KINDS, v.kind),
-        startArrowhead: head(v.startArrowhead),
-        endArrowhead: head(v.endArrowhead),
-        color: str(v.color),
-      });
-    }
-    case "frame": {
-      const id = str(v.id);
-      return id ? defined({ op: "frame" as const, id, name: str(v.name), children: Array.isArray(v.children) ? strs(v.children) : undefined }) : null;
-    }
-    case "delete": {
-      const ids = strs(v.ids);
-      return ids.length ? { op: "delete", ids } : null;
-    }
-    case "clear":
-      return { op: "clear" };
-    default:
-      return null;
-  }
-}
-
-/**
- * One call per complete line, in order. A line that isn't a call stays as an empty one, so line
- * counts and opsApplied agree. A last line without its newline is still being written: left out.
- */
-export function parseOps(text: string | null): Call[] {
-  if (!text) return [];
-  const lines = text.split("\n").slice(0, -1);
-  return lines.map((l) => {
-    let raw: unknown;
-    try {
-      raw = JSON.parse(l);
-    } catch {
-      raw = null;
-    }
-    const input = isObj(raw) && isObj(raw.input) ? raw.input : {};
-    const ops = Array.isArray(input.ops) ? input.ops.map(toOp).filter((o): o is Op => o !== null) : [];
-    return { ops, direction: input.direction === "LR" ? "LR" : "TB" };
-  });
-}
 
 export interface Replayed {
   elements: El[];
@@ -181,6 +60,8 @@ class Board {
   changed = false;
   private pending = new Map<string, EdgeSpec>();
   private frames = new Map<string, { name?: string; children: string[] }>();
+  /** Ids the current segment drew, redrew or erased: frames refit only around these. */
+  private touched = new Set<string>();
 
   constructor(elements: readonly El[]) {
     this.els = [...elements];
@@ -191,20 +72,34 @@ class Board {
     return this.els.find((e) => e.id === id && alive(e) && toolData(e) !== undefined);
   }
 
+  private kindOf(id: string) {
+    const e = this.get(id);
+    return e && toolData(e)!.kind;
+  }
+
+  /** A live node the tool drew: what edges connect. */
+  private getNode(id: string) {
+    return this.kindOf(id) === "node" ? this.get(id) : undefined;
+  }
+
   private labelOf(id: string) {
     return this.els.find((e) => e.containerId === id && alive(e));
   }
 
   /** Marks the elements matching `which` deleted. */
   private erase(which: (e: El) => boolean) {
-    this.els = this.els.map((e) => (alive(e) && which(e) ? bump(e, { isDeleted: true }) : e));
+    this.els = this.els.map((e) => {
+      if (!alive(e) || !which(e)) return e;
+      this.touched.add(e.id);
+      return bump(e, { isDeleted: true });
+    });
     this.changed = true;
   }
 
   /** Remembers what an applied line left behind: edges that may still wait, and frames. */
   remember(call: Call) {
     for (const op of call.ops) {
-      if (op.op === "edge") this.pending.set(op.id, op);
+      if (op.op === "edge") this.pending.set(op.id, { ...this.pending.get(op.id), ...edgeSpec(op) });
       else if (op.op === "frame") this.mergeFrame(op);
       else if (op.op === "delete") this.forget(op.ids);
       else if (op.op === "clear") {
@@ -217,7 +112,7 @@ class Board {
   /** Of the remembered edges, only the ones missing a node still wait: the rest were drawn, or erased by the user. */
   settleRemembered() {
     for (const [id, e] of this.pending) {
-      if (this.get(id) || (this.get(e.from) && this.get(e.to))) this.pending.delete(id);
+      if (this.get(id) || (this.getNode(e.from) && this.getNode(e.to))) this.pending.delete(id);
     }
   }
 
@@ -228,6 +123,7 @@ class Board {
       if (op.op === "delete" || op.op === "clear") {
         this.draw(segment, call.direction);
         segment = [];
+        this.touched = new Set();
         if (op.op === "delete") this.remove(op.ids);
         else this.clearAll();
       } else segment.push(op);
@@ -237,14 +133,18 @@ class Board {
 
   private draw(ops: Op[], dir: Direction) {
     if (ops.length === 0) return;
+    this.touched = new Set();
     const nodes = new Map<string, NodeOp>();
-    const edges: EdgeSpec[] = [];
     for (const op of ops) {
-      if (op.op === "node") nodes.set(op.id, { ...nodes.get(op.id), ...op });
-      else if (op.op === "edge") edges.push(op);
-      else if (op.op === "frame") this.mergeFrame(op);
+      // A node and a frame can't share an id: whichever came first keeps it.
+      if (op.op === "node") {
+        if (!this.frames.has(op.id) && this.kindOf(op.id) !== "frame") nodes.set(op.id, { ...nodes.get(op.id), ...op });
+      } else if (op.op === "edge") {
+        // Sent again, an edge keeps what the new op doesn't say, like a node.
+        const old = this.get(op.id);
+        this.pending.set(op.id, { ...(old && edgeOf(old)), ...this.pending.get(op.id), ...edgeSpec(op) });
+      } else if (op.op === "frame" && !nodes.has(op.id) && this.mergeFrame(op)) this.touched.add(op.id);
     }
-    for (const e of edges) this.pending.set(e.id, e);
     const allEdges = [...this.pending.values()];
 
     const before = bounds(this.obstacles());
@@ -261,15 +161,15 @@ class Board {
     for (const n of layerOrder(auto, allEdges)) {
       const spec = this.nodeSpec(n, undefined);
       const size = this.sizeOf(n, spec, undefined);
-      const preds = allEdges.filter((e) => e.to === n.id).flatMap((e) => this.get(e.from) ?? []);
+      const preds = allEdges.filter((e) => e.to === n.id).flatMap((e) => this.getNode(e.from) ?? []);
       const spot = preds.length ? nextLayerSpot(preds.map(box), size, dir) : this.rootSpot(n, before, dir);
       const placed = n.x !== undefined || n.y !== undefined ? { ...spot, ...size } : clearOf({ ...spot, ...size }, this.obstacles(), dir);
       this.putNode(spec, { ...placed, x: n.x ?? placed.x, y: n.y ?? placed.y });
     }
 
     // Edges on nodes that changed are redrawn to their new size and place.
-    for (const a of this.els.filter((e) => alive(e) && toolData(e)?.kind === "edge")) {
-      const e = toolData(a) as unknown as EdgeSpec;
+    for (const a of this.els.filter((e) => alive(e) && edgeOf(e))) {
+      const e = edgeOf(a)!;
       if (!this.pending.has(a.id) && (moved.has(e.from) || moved.has(e.to))) this.pending.set(a.id, e);
     }
     for (const e of [...this.pending.values()]) this.tryEdge(e);
@@ -304,9 +204,9 @@ class Board {
 
   /** An unconnected node: beside its `near` node, beside the rest of its frame, or right of everything. */
   private rootSpot(n: NodeOp, before: Box | null, dir: Direction) {
-    const nearEl = n.near ? this.get(n.near) : undefined;
+    const nearEl = n.near ? this.getNode(n.near) : undefined;
     const frame = this.frameOf(n.id, n.parent);
-    const siblings = frame ? bounds(this.frameChildren(frame).filter((id) => id !== n.id).flatMap((id) => this.get(id) ?? []).map(box)) : null;
+    const siblings = frame ? bounds(this.frameChildren(frame).filter((id) => id !== n.id).flatMap((id) => this.getNode(id) ?? []).map(box)) : null;
     const next = nearEl ? box(nearEl) : siblings;
     if (!next) return rootSpot(before);
     return dir === "TB" ? { x: next.x + next.width + SIBLING_GAP, y: next.y } : { x: next.x, y: next.y + next.height + SIBLING_GAP };
@@ -331,8 +231,8 @@ class Board {
   }
 
   private tryEdge(e: EdgeSpec) {
-    const from = this.get(e.from);
-    const to = this.get(e.to);
+    const from = this.getNode(e.from);
+    const to = this.getNode(e.to);
     if (!from || !to) {
       this.pending.set(e.id, e);
       return;
@@ -340,9 +240,9 @@ class Board {
     this.pending.delete(e.id);
     this.unbind(e.id);
     // Look the nodes up again: unbinding the old arrow may have replaced them.
-    this.replace(e.id, edgeElements(e, this.get(e.from)!, this.get(e.to)!));
+    this.replace(e.id, edgeElements(e, this.getNode(e.from)!, this.getNode(e.to)!));
     for (const id of new Set([e.from, e.to])) {
-      const n = this.get(id)!;
+      const n = this.getNode(id)!;
       this.swap(n, bump(n, { boundElements: [...(n.boundElements ?? []), { id: e.id, type: "arrow" }] }));
     }
   }
@@ -361,6 +261,7 @@ class Board {
     if (old) this.els.splice(Math.min(at, this.els.length), 0, ...made);
     else this.els.push(...made);
     if (!old && !this.added.includes(id)) this.added.push(id);
+    this.touched.add(id);
     this.changed = true;
   }
 
@@ -391,8 +292,8 @@ class Board {
         this.erase((e) => e === el);
         this.els = this.els.map((e) => (alive(e) && e.frameId === id ? bump(e, { frameId: null }) : e));
       } else {
-        for (const a of this.els.filter((e) => alive(e) && toolData(e)?.kind === "edge")) {
-          const spec = toolData(a) as unknown as EdgeSpec;
+        for (const a of this.els.filter((e) => alive(e) && edgeOf(e))) {
+          const spec = edgeOf(a)!;
           if (spec.from === id || spec.to === id) this.dropArrow(a.id);
         }
         const node = this.get(id);
@@ -421,9 +322,12 @@ class Board {
     for (const f of this.frames.values()) f.children = f.children.filter((c) => !gone.has(c));
   }
 
-  private mergeFrame(op: FrameOp) {
+  /** Adds a frame op to what is known of the frame; false when a node already has the id. */
+  private mergeFrame(op: FrameOp): boolean {
+    if (this.kindOf(op.id) === "node") return false;
     const f = this.frames.get(op.id) ?? { children: [] };
     this.frames.set(op.id, { name: op.name ?? f.name, children: [...new Set([...f.children, ...(op.children ?? [])])] });
+    return true;
   }
 
   private frameOf(id: string, parent: string | undefined) {
@@ -438,14 +342,26 @@ class Board {
     return [...new Set([...listed, ...parented])];
   }
 
-  /** Fits each frame around its children, and points them (and their labels) at it. */
+  /** Whether the tool drew `e`, or `e` is the label of something it drew. */
+  private drawnByTool(e: El) {
+    return !!toolData(e) || (!!e.containerId && !!this.get(e.containerId));
+  }
+
+  /**
+   * Fits each frame whose nodes this segment touched around them, and points the tool's elements
+   * (and their labels) at it. A frame nothing touched keeps the size the user gave it; the user's
+   * own elements keep whatever frame they are in.
+   */
   private layoutFrames() {
     const fids = new Set([...this.frames.keys(), ...this.els.flatMap((e) => (alive(e) && toolData(e)?.kind === "node" && toolData(e)?.parent ? [toolData(e)!.parent as string] : []))]);
     for (const fid of fids) {
-      const kids = new Set(this.frameChildren(fid).filter((id) => this.get(id) && toolData(this.get(id)!)?.kind === "node"));
+      const kids = new Set(this.frameChildren(fid).filter((id) => this.getNode(id)));
+      const old = this.get(fid);
+      const t = this.touched;
+      const refit = !old || t.has(fid) || [...kids].some((id) => t.has(id)) || this.els.some((e) => t.has(e.id) && e.frameId === fid);
+      if (!refit) continue;
       const members = this.els.filter((e) => alive(e) && (kids.has(e.id) || (!!e.containerId && kids.has(e.containerId))));
       const b = bounds(members.map(box));
-      const old = this.get(fid);
       if (!b) {
         if (old) this.remove([fid]);
         continue;
@@ -454,13 +370,19 @@ class Board {
       const padded = { x: b.x - FRAME_PAD, y: b.y - FRAME_PAD, width: b.width + 2 * FRAME_PAD, height: b.height + 2 * FRAME_PAD };
       const same = old && old.name === name && (["x", "y", "width", "height"] as const).every((k) => old[k] === padded[k]);
       if (!same) this.replace(fid, [frameElement(fid, name, padded)]);
-      for (const e of this.els.filter(alive)) {
+      for (const e of this.els.filter((x) => alive(x) && this.drawnByTool(x))) {
         const inside = kids.has(e.id) || (!!e.containerId && kids.has(e.containerId));
         const want = inside ? fid : e.frameId === fid ? null : e.frameId;
         if ((e.frameId ?? null) !== (want ?? null)) this.swap(e, bump(e, { frameId: want ?? null }));
       }
     }
   }
+}
+
+/** An edge op as the edge it draws. */
+function edgeSpec(op: EdgeSpec & { op?: string }): EdgeSpec {
+  const { op: _op, ...spec } = op;
+  return spec;
 }
 
 /** New nodes in layer order: a node after the nodes its edges come from; ties (and cycles) in call order. */

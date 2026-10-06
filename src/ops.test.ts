@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { opsPath, parseOps, replay, type El } from "./ops";
+import { inView } from "./layout";
+import { replay, type El } from "./ops";
 
 /** One appended tool call, as Rooms writes it. */
 const line = (ops: unknown[], direction?: string) =>
@@ -23,25 +24,6 @@ const userRect = (id: string, x: number, y: number, width: number, height: numbe
   width,
   height,
   isDeleted: false,
-});
-
-describe("ops file", () => {
-  it("lives beside the document's notes", () => {
-    expect(opsPath("9f2c01")).toBe("notes/9f2c01.ops.jsonl");
-  });
-
-  it("counts every complete line, keeps bad ones as empty calls, and waits for an unfinished last line", () => {
-    const text = file(line([node("a")]), "{not json\n", line([{ op: "node" }, { op: "wat" }, { op: "edge", from: "b", to: "b" }, node("b")], "LR"), '{"input":');
-    const calls = parseOps(text);
-    expect(calls).toHaveLength(3);
-    expect(calls[0].ops.map((o) => o.op)).toEqual(["node"]);
-    expect(calls[1].ops).toEqual([]);
-    // The node without an id, the unknown op and the self-loop are dropped; the rest of the call stays.
-    expect(calls[2].ops).toEqual([expect.objectContaining({ op: "node", id: "b" })]);
-    expect(calls[2].direction).toBe("LR");
-    expect(calls[0].direction).toBe("TB");
-    expect(parseOps(null)).toEqual([]);
-  });
 });
 
 describe("replay", () => {
@@ -167,6 +149,37 @@ describe("replay", () => {
     expect(live(r.elements).map((e) => e.id).filter((id) => !live(r.elements).find((e) => e.id === id)?.containerId)).toEqual(["mine", "c"]);
   });
 
+
+  it("keeps a dashed edge an edge: deleting its node removes it", () => {
+    const r = replay([], file(line([node("a"), node("b"), { op: "edge", from: "a", to: "b", kind: "dashed" }]), line([{ op: "delete", ids: ["b"] }])), 0);
+    expect(has(r.elements, "a->b")).toBe(false);
+  });
+
+  it("merges an edge sent again, like a node", () => {
+    const text = file(line([node("a"), node("b"), { op: "edge", from: "a", to: "b", label: "reads" }]), line([{ op: "edge", from: "a", to: "b", kind: "dashed" }]));
+    const r = replay([], text, 0);
+    expect(labelOf(r.elements, "a->b")).toBe("reads");
+    expect(byId(r.elements, "a->b").strokeStyle).toBe("dashed");
+  });
+
+  it("drops a node or frame whose id the other already uses", () => {
+    const r = replay([], file(line([node("a"), { op: "frame", id: "a", children: ["a"] }, { op: "frame", id: "z", name: "Zone", children: ["b"] }, node("b"), node("z")])), 0);
+    expect(byId(r.elements, "a").type).toBe("rectangle");
+    expect(byId(r.elements, "z").type).toBe("frame");
+    expect(byId(r.elements, "b").frameId).toBe("z");
+    expect(live(r.elements).filter((e) => e.id === "z")).toHaveLength(1);
+  });
+
+  it("leaves the user's elements in a frame alone, and a frame the user resized while its nodes stay put", () => {
+    const first = replay([], file(line([node("a", { parent: "zone" }), { op: "frame", id: "zone", name: "Zone" }])), 0);
+    const mine: El = { ...userRect("mine", 5000, 5000, 10, 10), frameId: "zone" };
+    const resized = first.elements.map((e) => (e.id === "zone" ? { ...e, width: e.width + 300 } : e));
+    const text = file(line([node("a", { parent: "zone" }), { op: "frame", id: "zone", name: "Zone" }]), line([node("c")]));
+    const r = replay([...resized, mine], text, 1);
+    expect(byId(r.elements, "mine").frameId).toBe("zone");
+    expect(byId(r.elements, "zone").width).toBe(byId(resized, "zone").width);
+  });
+
   it("frames group their children", () => {
     const r = replay([], file(line([node("a"), node("b", { parent: "zone" }), { op: "frame", id: "zone", name: "Backend", children: ["a"] }])), 0);
     const f = byId(r.elements, "zone");
@@ -178,5 +191,16 @@ describe("replay", () => {
       expect(e.x + e.width).toBeLessThan(f.x + f.width);
     }
     expect(live(r.elements).find((e) => e.containerId === "a")?.frameId).toBe("zone");
+  });
+});
+
+describe("inView", () => {
+  const view = { scrollX: 0, scrollY: 0, zoom: 2, width: 800, height: 600 };
+  it("sees boxes inside the scene area the viewport shows", () => {
+    // At zoom 2 the viewport shows scene x 0..400, y 0..300.
+    expect(inView([{ x: 350, y: 10, width: 100, height: 50 }], view)).toBe(true);
+    expect(inView([{ x: 450, y: 10, width: 100, height: 50 }], view)).toBe(false);
+    expect(inView([{ x: 450, y: 10, width: 100, height: 50 }], { ...view, scrollX: -300 })).toBe(true);
+    expect(inView([], view)).toBe(false);
   });
 });

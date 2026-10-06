@@ -4,7 +4,9 @@ import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 import "@excalidraw/excalidraw/index.css";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Notes, pngName, serializeScene, type Scene } from "./notes";
-import { opsPath, replay, type El } from "./ops";
+import { inView } from "./layout";
+import { opsPath, type El } from "./ops";
+import { nextStep, readOps, Serial, settled, syncStep, type OpsRead } from "./sync";
 
 const SAVE_DELAY_MS = 400;
 /** How long "Drawing…" shows after an agent's drawing arrives. */
@@ -39,31 +41,77 @@ export function App({ rooms }: { rooms: RoomsPlugin }) {
     drawingTimer.current = setTimeout(() => setDrawing(false), DRAWING_BADGE_MS);
   };
 
+  /** Ids still fading in. Saves write them at full opacity. */
+  const fading = useRef(new Set<string>());
+  /** New elements (and their labels) fade in on board `a`. Steps aren't undo steps: only the drawing is. */
+  const fadeIn = (a: ExcalidrawImperativeAPI, ids: readonly string[]) => {
+    if (ids.length === 0) return;
+    const set = new Set(ids);
+    ids.forEach((id) => fading.current.add(id));
+    const done = () => ids.forEach((id) => fading.current.delete(id));
+    const start = performance.now();
+    const step = () => {
+      if (a !== api.current) return done(); // another document, or the panel closed
+      const t = Math.min(1, (performance.now() - start) / FADE_MS);
+      a.updateScene({
+        elements: a
+          .getSceneElementsIncludingDeleted()
+          .map((e) => (set.has(e.id) || (e.type === "text" && e.containerId && set.has(e.containerId)) ? newElementWith(e, { opacity: Math.round(20 + 80 * t) }) : e)),
+        captureUpdate: CaptureUpdateAction.NEVER,
+      });
+      if (t < 1) requestAnimationFrame(step);
+      else done();
+    };
+    step();
+  };
+
+  /** Brings new drawing into view, unless some of it already is. */
+  const reveal = (a: ExcalidrawImperativeAPI, ids: readonly string[]) => {
+    const set = new Set(ids);
+    const shown = a.getSceneElements().filter((e) => set.has(e.id));
+    const st = a.getAppState();
+    const view = { scrollX: st.scrollX, scrollY: st.scrollY, zoom: st.zoom.value, width: st.width, height: st.height };
+    if (shown.length && !inView(shown, view)) a.scrollToContent(shown, { animate: true });
+  };
+
+  /** The open document's scene as a save writes it. */
+  const save = (elements: readonly unknown[], appState: Record<string, unknown>, files: Record<string, unknown>, applied: number) => {
+    const now = new Set(fading.current);
+    notes.change(() => serializeScene({ elements: settled(elements as El[], now), appState, files, opsApplied: applied }));
+  };
+
+  const serial = useMemo(() => new Serial((e) => console.error("Excalidraw notes: couldn't apply the agent's drawing", e)), []);
+  /** The board that has loaded its scene: before that, drawing on a board would be overwritten. */
+  const loadedBoard = useRef<ExcalidrawImperativeAPI | null>(null);
+
   /** Applies what the draw tool appended since the last time, onto the live board. One at a time. */
-  const syncing = useRef(Promise.resolve());
-  const sync = () => {
-    syncing.current = syncing.current.then(async () => {
+  const sync = () =>
+    serial.run(async () => {
       const key = openKey.current;
       const a = api.current;
-      if (!key || !a) return;
-      const text = await rooms.storage.read(opsPath(key)).catch(() => null);
-      if (key !== openKey.current || a !== api.current) return;
-      const r = replay(a.getSceneElementsIncludingDeleted() as unknown as El[], text, opsApplied.current);
-      if (r.applied === opsApplied.current && !r.changed) return;
-      opsApplied.current = r.applied;
-      if (r.changed) {
-        // Excalidraw's onChange saves it, with the new opsApplied.
-        a.updateScene({ elements: r.elements as never, captureUpdate: CaptureUpdateAction.IMMEDIATELY });
-        fadeIn(a, new Set(r.added));
-        showDrawing();
-      } else {
-        // Only lines that drew nothing: nothing changes on the board, but the count must be saved.
-        const applied = r.applied;
-        notes.change(() => serializeScene({ elements: a.getSceneElements(), appState: a.getAppState() as never, files: a.getFiles(), opsApplied: applied }));
+      if (!key || !a || loadedBoard.current !== a) return;
+      const step = await syncStep({
+        key,
+        isCurrent: () => key === openKey.current && a === api.current,
+        read: rooms.storage.read,
+        elements: () => a.getSceneElementsIncludingDeleted() as unknown as El[],
+        applied: () => opsApplied.current,
+      });
+      if (step.kind === "none") return;
+      if (step.kind === "count") {
+        // Nothing changes on the board, but the count must be saved.
+        opsApplied.current = step.applied;
+        save(a.getSceneElements(), a.getAppState() as never, a.getFiles(), step.applied);
+        return;
       }
+      const r = step.replayed;
+      opsApplied.current = r.applied;
+      // Excalidraw's onChange saves it, with the new opsApplied.
+      a.updateScene({ elements: r.elements as never, captureUpdate: CaptureUpdateAction.IMMEDIATELY });
+      reveal(a, r.added);
+      fadeIn(a, r.added);
+      showDrawing();
     });
-    return syncing.current;
-  };
 
   useEffect(() => {
     let seq = 0;
@@ -77,39 +125,50 @@ export function App({ rooms }: { rooms: RoomsPlugin }) {
       setView({ kind: "loading" });
       void (async () => {
         const r = await notes.open(key);
-        const text = r.ok ? await rooms.storage.read(opsPath(key)).catch(() => null) : null;
+        const read: OpsRead = r.ok ? await readOps(rooms.storage.read, key) : { ok: false };
         if (mine !== seq) return;
         if (!r.ok) {
           version.current = -1;
           setView({ kind: "broken" });
           return;
         }
-        // What agents drew while the panel was closed goes in before the board shows.
-        const scene = r.scene ?? { elements: [], appState: {}, files: {}, opsApplied: 0 };
-        const drawn = replay(scene.elements as El[], text, scene.opsApplied);
-        const next = { ...scene, elements: drawn.elements, opsApplied: drawn.applied };
-        opsApplied.current = drawn.applied;
-        if (drawn.changed || drawn.applied !== scene.opsApplied) notes.change(() => serializeScene(next));
-        if (drawn.changed) showDrawing();
-        version.current = getSceneVersion(next.elements as never);
+        let scene: Scene = r.scene ?? { elements: [], appState: {}, files: {}, opsApplied: 0 };
+        try {
+          // What agents drew while the panel was closed goes in before the board shows.
+          const step = nextStep(read, scene.elements as El[], scene.opsApplied);
+          if (step.kind !== "none") {
+            scene = step.kind === "draw" ? { ...scene, elements: step.replayed.elements, opsApplied: step.replayed.applied } : { ...scene, opsApplied: step.applied };
+            const next = scene;
+            notes.change(() => serializeScene(next));
+            if (step.kind === "draw") showDrawing();
+          }
+        } catch (e) {
+          // The notes still open as they were; the next sync tries again.
+          console.error("Excalidraw notes: couldn't apply the agent's drawing", e);
+        }
+        opsApplied.current = scene.opsApplied;
+        version.current = getSceneVersion(scene.elements as never);
         openKey.current = key;
-        setView({ kind: "ready", scene: next, key });
+        setView({ kind: "ready", scene, key });
       })();
     });
     const offData = rooms.storage.onChange((path) => {
       if (openKey.current && path === opsPath(openKey.current)) void sync();
     });
     const offClose = rooms.onBeforeClose(async () => {
-      await syncing.current;
-      await notes.flush();
+      try {
+        await serial.idle();
+      } finally {
+        await notes.flush();
+      }
     });
     return () => {
       offContext();
       offData();
       offClose();
     };
-    // sync and showDrawing use only refs, state setters, rooms and notes: the first render's copies stay right.
-  }, [rooms, notes]);
+    // sync, save and showDrawing use only refs, state setters, rooms, notes and serial: the first render's copies stay right.
+  }, [rooms, notes, serial]);
 
   const exportPng = async () => {
     const a = api.current;
@@ -157,11 +216,7 @@ export function App({ rooms }: { rooms: RoomsPlugin }) {
     <div className="board">
       <Excalidraw
         key={view.key}
-        excalidrawAPI={(a) => {
-          api.current = a;
-          // Catches up on anything appended while the board was loading.
-          void sync();
-        }}
+        excalidrawAPI={(a) => (api.current = a)}
         initialData={{
           elements: (view.scene?.elements ?? []) as never,
           appState: { ...(view.scene?.appState ?? {}), theme: "light" },
@@ -169,11 +224,15 @@ export function App({ rooms }: { rooms: RoomsPlugin }) {
           scrollToContent: true,
         }}
         onChange={(elements, appState, files) => {
+          if (api.current && loadedBoard.current !== api.current) {
+            // A board's first change comes once its scene has loaded: catch up on what was appended meanwhile.
+            loadedBoard.current = api.current;
+            void sync();
+          }
           const v = getSceneVersion(elements);
           if (v === version.current) return; // nothing drawn since the last save or the load
           version.current = v;
-          const applied = opsApplied.current;
-          notes.change(() => serializeScene({ elements, appState: appState as unknown as Record<string, unknown>, files, opsApplied: applied }));
+          save(elements, appState as unknown as Record<string, unknown>, files, opsApplied.current);
         }}
         UIOptions={{
           canvasActions: { loadScene: false, saveToActiveFile: false, export: false, saveAsImage: false, toggleTheme: false },
@@ -208,19 +267,3 @@ export function App({ rooms }: { rooms: RoomsPlugin }) {
   );
 }
 
-/** New elements (and their labels) fade in. Steps aren't undo steps: only the drawing itself is. */
-function fadeIn(a: ExcalidrawImperativeAPI, ids: Set<string>) {
-  if (ids.size === 0) return;
-  const start = performance.now();
-  const step = () => {
-    const t = Math.min(1, (performance.now() - start) / FADE_MS);
-    a.updateScene({
-      elements: a
-        .getSceneElementsIncludingDeleted()
-        .map((e) => (ids.has(e.id) || (e.type === "text" && e.containerId && ids.has(e.containerId)) ? newElementWith(e, { opacity: Math.round(20 + 80 * t) }) : e)),
-      captureUpdate: CaptureUpdateAction.NEVER,
-    });
-    if (t < 1) requestAnimationFrame(step);
-  };
-  step();
-}
