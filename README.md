@@ -40,7 +40,7 @@ A notes file that can't be read is never overwritten: the panel asks before star
 
 ## Develop
 
-`@alto-rooms/plugin-sdk` points at a local checkout (`file:../alto-rooms/packages/plugin-sdk`, SDK 0.2.0) while the draw tool is in development. Point it back at the `plugin-sdk-v0.2.0` release tarball before publishing.
+`@alto-rooms/plugin-sdk` comes from the `plugin-sdk-v0.2.0` release tarball. Requires Alto Rooms 0.5.0.
 
 ```sh
 bun install
