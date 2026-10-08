@@ -1,7 +1,5 @@
 import type { PluginArtifact, PluginContext, RoomsPlugin } from "@alto-rooms/plugin-sdk";
-import { CaptureUpdateAction, Excalidraw, MainMenu, exportToBlob, getSceneVersion, newElementWith } from "@excalidraw/excalidraw";
 import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
-import "@excalidraw/excalidraw/index.css";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Notes, pngName, serializeScene, type Scene } from "./notes";
 import { inView } from "./layout";
@@ -19,7 +17,16 @@ const DOWNLOAD_ICON = (
   </svg>
 );
 
-type View = { kind: "loading" } | { kind: "broken" } | { kind: "ready"; scene: Scene | null; key: string };
+type Ex = typeof import("./excalidraw");
+/** Excalidraw, loaded the first time a board shows. A document with nothing drawn never loads it. */
+let loading: Promise<Ex> | null = null;
+const loadExcalidraw = () => (loading ??= import("./excalidraw").catch((e) => {
+  loading = null;
+  throw e;
+}));
+
+/** `board`: Excalidraw is up; otherwise nothing is drawn yet and a light "start" surface stands in. */
+type View = { kind: "loading" } | { kind: "broken" } | { kind: "unloadable" } | { kind: "ready"; scene: Scene | null; key: string; board: boolean };
 
 export function App({ rooms }: { rooms: RoomsPlugin }) {
   const [doc, setDoc] = useState<PluginArtifact | null>(null);
@@ -27,6 +34,13 @@ export function App({ rooms }: { rooms: RoomsPlugin }) {
   const [failing, setFailing] = useState(false);
   const [drawing, setDrawing] = useState(false);
   const api = useRef<ExcalidrawImperativeAPI | null>(null);
+  /** Excalidraw's module once loaded; set before any board mounts, so code that has `api` has it. */
+  const [ex, setEx] = useState<Ex | null>(null);
+  const exRef = useRef<Ex | null>(null);
+  /** Whether a board is up (or coming) for the open document. */
+  const boardOn = useRef(false);
+  /** Brings up the board for the open document (a click on the start surface, or an agent's drawing). */
+  const startBoard = useRef<() => void>(() => {});
   const version = useRef(-1);
   /** The open document's fileKey while its notes can be drawn on; null while loading or broken. */
   const openKey = useRef<string | null>(null);
@@ -46,6 +60,7 @@ export function App({ rooms }: { rooms: RoomsPlugin }) {
   /** New elements (and their labels) fade in on board `a`. Steps aren't undo steps: only the drawing is. */
   const fadeIn = (a: ExcalidrawImperativeAPI, ids: readonly string[]) => {
     if (ids.length === 0) return;
+    const { newElementWith, CaptureUpdateAction } = exRef.current!;
     const set = new Set(ids);
     ids.forEach((id) => fading.current.add(id));
     const done = () => ids.forEach((id) => fading.current.delete(id));
@@ -105,6 +120,7 @@ export function App({ rooms }: { rooms: RoomsPlugin }) {
         return;
       }
       const r = step.replayed;
+      const { CaptureUpdateAction } = exRef.current!;
       // Excalidraw's onChange saves it, with the new opsApplied; counted only once the scene took it.
       a.updateScene({ elements: r.elements as never, captureUpdate: CaptureUpdateAction.IMMEDIATELY });
       opsApplied.current = r.applied;
@@ -112,6 +128,24 @@ export function App({ rooms }: { rooms: RoomsPlugin }) {
       fadeIn(a, r.added);
       showDrawing();
     });
+
+  /** Loads Excalidraw (once) and shows the board for document `key`, unless another one opened meanwhile. */
+  const showBoard = async (key: string, isCurrent: () => boolean) => {
+    boardOn.current = true;
+    let m: Ex;
+    try {
+      m = await loadExcalidraw();
+    } catch (e) {
+      console.error("Excalidraw notes: couldn't load the board", e);
+      boardOn.current = false;
+      return false;
+    }
+    if (!isCurrent() || openKey.current !== key) return false;
+    exRef.current = m;
+    setEx(m);
+    setView((v) => (v.kind === "ready" && !v.board ? { ...v, board: true } : v));
+    return true;
+  };
 
   useEffect(() => {
     let seq = 0;
@@ -121,6 +155,7 @@ export function App({ rooms }: { rooms: RoomsPlugin }) {
       const key = ctx.artifact.fileKey;
       openKey.current = null;
       api.current = null; // the board unmounts while the next document loads
+      boardOn.current = false;
       setDoc(ctx.artifact);
       setView({ kind: "loading" });
       void (async () => {
@@ -146,14 +181,38 @@ export function App({ rooms }: { rooms: RoomsPlugin }) {
           // The notes still open as they were; the next sync tries again.
           console.error("Excalidraw notes: couldn't apply the agent's drawing", e);
         }
+        // Nothing drawn (deleted elements count as drawn): no board, and no Excalidraw, until there is.
+        const drawn = scene.elements.length > 0;
+        if (drawn) {
+          try {
+            exRef.current = await loadExcalidraw();
+          } catch (e) {
+            console.error("Excalidraw notes: couldn't load the board", e);
+          }
+          if (mine !== seq) return;
+        }
+        const m = exRef.current;
+        if (drawn && !m) {
+          setView({ kind: "unloadable" });
+          return;
+        }
+        if (m) setEx(m);
         opsApplied.current = scene.opsApplied;
-        version.current = getSceneVersion(scene.elements as never);
+        // getSceneVersion of no elements is 0.
+        version.current = drawn ? m!.getSceneVersion(scene.elements as never) : 0;
         openKey.current = key;
-        setView({ kind: "ready", scene, key });
+        boardOn.current = drawn;
+        setView({ kind: "ready", scene, key, board: drawn });
       })();
+      startBoard.current = () => {
+        if (openKey.current === key && !boardOn.current) void showBoard(key, () => mine === seq);
+      };
     });
     const offData = rooms.storage.onChange((path) => {
-      if (openKey.current && path === opsPath(openKey.current)) void sync();
+      if (!openKey.current || path !== opsPath(openKey.current)) return;
+      // An agent drew on a document with no board yet: bring one up; its first change syncs.
+      if (!boardOn.current) startBoard.current();
+      else void sync();
     });
     const offClose = rooms.onBeforeClose(async () => {
       try {
@@ -172,10 +231,11 @@ export function App({ rooms }: { rooms: RoomsPlugin }) {
 
   const exportPng = async () => {
     const a = api.current;
-    if (!a || !doc) return;
+    const m = exRef.current;
+    if (!a || !m || !doc) return;
     const elements = a.getSceneElements();
     if (elements.length === 0) return;
-    const blob = await exportToBlob({
+    const blob = await m.exportToBlob({
       elements,
       files: a.getFiles(),
       appState: { ...a.getAppState(), exportBackground: true },
@@ -191,6 +251,14 @@ export function App({ rooms }: { rooms: RoomsPlugin }) {
   };
 
   if (view.kind === "loading") return <div className="blank" />;
+  if (view.kind === "unloadable") {
+    return (
+      <div className="message">
+        <p>The board couldn't load.</p>
+        <p className="muted">Your notes are untouched. Reopen the panel to try again.</p>
+      </div>
+    );
+  }
   if (view.kind === "broken") {
     return (
       <div className="message">
@@ -203,7 +271,8 @@ export function App({ rooms }: { rooms: RoomsPlugin }) {
             version.current = 0;
             opsApplied.current = 0;
             openKey.current = doc?.fileKey ?? null;
-            setView({ kind: "ready", scene: null, key: `${doc?.fileKey}-fresh` });
+            boardOn.current = false;
+            setView({ kind: "ready", scene: null, key: `${doc?.fileKey}-fresh`, board: false });
           }}
         >
           Start over
@@ -212,6 +281,15 @@ export function App({ rooms }: { rooms: RoomsPlugin }) {
     );
   }
 
+  if (!view.board || !ex) {
+    return (
+      <button type="button" className="start" onClick={() => startBoard.current()}>
+        <span>Click to sketch</span>
+      </button>
+    );
+  }
+
+  const { Excalidraw, MainMenu, getSceneVersion } = ex;
   return (
     <div className="board">
       <Excalidraw
