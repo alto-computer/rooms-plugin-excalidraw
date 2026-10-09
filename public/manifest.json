@@ -10,7 +10,8 @@
   ],
   "slots": {
     "artifact.sidePanel": {
-      "title": "Notes"
+      "title": "Notes",
+      "icon": "palette"
     }
   },
   "tools": {

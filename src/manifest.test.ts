@@ -11,6 +11,10 @@ describe("manifest", () => {
     expect(draw.input.required).toEqual(["doc", "ops"]);
   });
 
+  it("shows the side panel as a palette icon", () => {
+    expect(manifest.slots["artifact.sidePanel"].icon).toBe("palette");
+  });
+
   it("appends where the panel reads", () => {
     expect(draw.appendTo.replace("{doc}", "0123456789abcdef")).toBe(opsPath("0123456789abcdef"));
   });
