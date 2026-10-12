@@ -8,24 +8,41 @@ type BoardProps = {
   theme?: string;
   initialData: { appState: Record<string, unknown> };
   onChange: (elements: unknown[], appState: Record<string, unknown>, files: Record<string, unknown>) => void;
+  excalidrawAPI: (api: unknown) => void;
 };
-const ex = vi.hoisted(() => ({ loaded: false, boards: 0, props: null as BoardProps | null }));
+// `appState` is what the board's API reports; `exported` is the appState each PNG export was asked for.
+const ex = vi.hoisted(() => ({
+  loaded: false,
+  boards: 0,
+  props: null as BoardProps | null,
+  appState: {} as Record<string, unknown>,
+  exportPng: null as (() => void) | null,
+  exported: [] as Record<string, unknown>[],
+}));
 vi.mock("./excalidraw", () => {
   ex.loaded = true;
   return {
     Excalidraw: (props: BoardProps & { children?: unknown }) => {
       ex.boards++;
       ex.props = props;
+      props.excalidrawAPI({
+        getSceneElements: () => [{ id: "a", type: "rectangle", version: 3 }],
+        getAppState: () => ex.appState,
+        getFiles: () => ({}),
+      });
       const { children } = props;
       return <div data-board>{children as never}</div>;
     },
     MainMenu: Object.assign(({ children }: { children?: unknown }) => <>{children as never}</>, {
-      Item: () => null,
+      Item: ({ onSelect, children }: { onSelect: () => void; children?: unknown }) => {
+        if (children === "Export PNG") ex.exportPng = onSelect;
+        return null;
+      },
       Separator: () => null,
       DefaultItems: { ClearCanvas: () => null, ChangeCanvasBackground: () => null, Help: () => null },
     }),
     CaptureUpdateAction: { IMMEDIATELY: "IMMEDIATELY", NEVER: "NEVER" },
-    exportToBlob: async () => new Blob(),
+    exportToBlob: async ({ appState }: { appState: Record<string, unknown> }) => (ex.exported.push(appState), new Blob()),
     getSceneVersion: (els: { version?: number }[]) => els.reduce((n, e) => n + (e.version ?? 0), 0),
     newElementWith: (e: object, u: object) => ({ ...e, ...u }),
   };
@@ -75,6 +92,9 @@ beforeEach(() => {
   ex.loaded = false;
   ex.boards = 0;
   ex.props = null;
+  ex.appState = {};
+  ex.exportPng = null;
+  ex.exported = [];
   vi.resetModules();
   el = document.createElement("div");
   document.body.append(el);
@@ -147,19 +167,72 @@ describe("App: the board follows the app's theme", () => {
     expect(ex.props?.theme).toBe("light");
   });
 
-  it("shows the pane through a default background and saves the background the file had", async () => {
+  it("does not save when only the app's theme changes", async () => {
     const files: Record<string, string> = { "notes/k.excalidraw": withBackground("#ffffff") };
-    await mount(files, dark);
-    const shown = ex.props!.initialData.appState;
-    expect(shown.viewBackgroundColor).toBe("transparent");
-    act(() => ex.props!.onChange([{ id: "a", type: "rectangle", version: 4 }], shown, {}));
+    const before = files["notes/k.excalidraw"];
+    const f = await mount(files, dark);
+    const write = vi.spyOn(f.rooms.storage, "write");
+    act(() => f.setTheme(light));
+    // Excalidraw reports the switch as a change of its appState; nothing on the board changed.
+    act(() => ex.props!.onChange([{ id: "a", type: "rectangle", version: 3 }], { ...ex.props!.initialData.appState, theme: "light" }, {}));
     await act(() => new Promise((r) => setTimeout(r, 500)));
-    expect(JSON.parse(files["notes/k.excalidraw"]).appState).toEqual({ viewBackgroundColor: "#ffffff" });
+    expect(write).not.toHaveBeenCalled();
+    expect(files["notes/k.excalidraw"]).toBe(before);
+  });
+});
+
+describe("App: the background", () => {
+  beforeEach(() => {
+    URL.createObjectURL = () => "blob:png";
+    URL.revokeObjectURL = () => {};
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
   });
 
-  it("keeps a background the user chose", async () => {
-    const files: Record<string, string> = { "notes/k.excalidraw": withBackground("#ffc9c9") };
+  /**
+   * Opens a drawing saved on `bg`, then draws with the background `picked` (unchanged when absent).
+   * Returns what the board showed on open, what the edit saved, and what Export PNG painted.
+   */
+  async function roundTrip(bg: string, picked?: string) {
+    const files: Record<string, string> = { "notes/k.excalidraw": withBackground(bg) };
     await mount(files, dark);
-    expect(ex.props!.initialData.appState.viewBackgroundColor).toBe("#ffc9c9");
+    const shown = ex.props!.initialData.appState;
+    const now = picked === undefined ? shown : { ...shown, viewBackgroundColor: picked };
+    act(() => ex.props!.onChange([{ id: "a", type: "rectangle", version: 4 }], now, {}));
+    await act(() => new Promise((r) => setTimeout(r, 500)));
+    ex.appState = now;
+    await act(async () => ex.exportPng!());
+    return {
+      shown: shown.viewBackgroundColor,
+      saved: JSON.parse(files["notes/k.excalidraw"]).appState.viewBackgroundColor,
+      exported: ex.exported[0]?.viewBackgroundColor,
+    };
+  }
+
+  it("shows the pane through the default white, and saves and exports white", async () => {
+    const r = await roundTrip("#ffffff");
+    expect(r.shown).not.toBe("#ffffff");
+    expect(r.shown).toMatch(/^#[0-9a-f]{6}00$/);
+    expect(r.saved).toBe("#ffffff");
+    expect(r.exported).toBe("#ffffff");
+  });
+
+  it("keeps a transparent background the user chose, in the file and in the PNG", async () => {
+    expect(await roundTrip("transparent")).toEqual({ shown: "transparent", saved: "transparent", exported: "transparent" });
+  });
+
+  it("keeps transparent when the user picks it on a default white board", async () => {
+    const r = await roundTrip("#ffffff", "transparent");
+    expect(r.saved).toBe("transparent");
+    expect(r.exported).toBe("transparent");
+  });
+
+  it("keeps a colour the user picks on a default white board", async () => {
+    const r = await roundTrip("#ffffff", "#a5d8ff");
+    expect(r.saved).toBe("#a5d8ff");
+    expect(r.exported).toBe("#a5d8ff");
+  });
+
+  it("keeps a colour the user chose", async () => {
+    expect(await roundTrip("#ffc9c9")).toEqual({ shown: "#ffc9c9", saved: "#ffc9c9", exported: "#ffc9c9" });
   });
 });

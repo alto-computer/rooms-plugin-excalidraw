@@ -3,10 +3,13 @@
  * the canvas is transparent and the panel's `--rooms-bg` shows through (dark mode inverts the
  * canvas, so a colour painted on it would come out inverted). That is display only. The notes file
  * keeps the background it had, and a PNG exports on it, white by default, as before.
+ *
+ * THEMED is a transparent colour of its own, not "transparent": a user can pick "transparent" from
+ * Excalidraw's palette, and that choice must reach the file and the export unchanged.
  */
 
 export const DEFAULT_BACKGROUND = "#ffffff";
-export const THEMED = "transparent";
+export const THEMED = "#ffffff00";
 
 /** What the board shows for the background `saved` in the notes file. */
 export const shownBackground = (saved: unknown): string =>
