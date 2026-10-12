@@ -1,6 +1,7 @@
-import type { PluginArtifact, PluginContext, RoomsPlugin } from "@alto-rooms/plugin-sdk";
+import type { PluginArtifact, PluginContext, RoomsPlugin, ThemeScheme } from "@alto-rooms/plugin-sdk";
 import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { DEFAULT_BACKGROUND, savedBackground, shownBackground } from "./background";
 import { Notes, pngName, serializeScene, type Scene } from "./notes";
 import { inView } from "./layout";
 import { opsPath, type El } from "./ops";
@@ -33,6 +34,8 @@ export function App({ rooms }: { rooms: RoomsPlugin }) {
   const [view, setView] = useState<View>({ kind: "loading" });
   const [failing, setFailing] = useState(false);
   const [drawing, setDrawing] = useState(false);
+  const [scheme, setScheme] = useState<ThemeScheme>(() => rooms.theme.current()?.scheme ?? "light");
+  useEffect(() => rooms.theme.onChange((t) => setScheme(t.scheme)), [rooms]);
   const api = useRef<ExcalidrawImperativeAPI | null>(null);
   /** Excalidraw's module once loaded; set before any board mounts, so code that has `api` has it. */
   const [ex, setEx] = useState<Ex | null>(null);
@@ -46,6 +49,8 @@ export function App({ rooms }: { rooms: RoomsPlugin }) {
   const openKey = useRef<string | null>(null);
   /** Lines of the open document's ops file already in its scene; saved with it. */
   const opsApplied = useRef(0);
+  /** The open document's background as its notes file has it. */
+  const background = useRef<unknown>(undefined);
   const notes = useMemo(() => new Notes(rooms.storage, SAVE_DELAY_MS, setFailing), [rooms]);
 
   const drawingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -92,7 +97,8 @@ export function App({ rooms }: { rooms: RoomsPlugin }) {
   /** The open document's scene as a save writes it. */
   const save = (elements: readonly unknown[], appState: Record<string, unknown>, files: Record<string, unknown>, applied: number) => {
     const now = new Set(fading.current);
-    notes.change(() => serializeScene({ elements: settled(elements as El[], now), appState, files, opsApplied: applied }));
+    const kept = { ...appState, viewBackgroundColor: savedBackground(appState.viewBackgroundColor, background.current) };
+    notes.change(() => serializeScene({ elements: settled(elements as El[], now), appState: kept, files, opsApplied: applied }));
   };
 
   const serial = useMemo(() => new Serial((e) => console.error("Excalidraw notes: couldn't apply the agent's drawing", e)), []);
@@ -198,6 +204,7 @@ export function App({ rooms }: { rooms: RoomsPlugin }) {
         }
         if (m) setEx(m);
         opsApplied.current = scene.opsApplied;
+        background.current = scene.appState.viewBackgroundColor;
         // getSceneVersion of no elements is 0.
         version.current = drawn ? m!.getSceneVersion(scene.elements as never) : 0;
         openKey.current = key;
@@ -235,10 +242,13 @@ export function App({ rooms }: { rooms: RoomsPlugin }) {
     if (!a || !m || !doc) return;
     const elements = a.getSceneElements();
     if (elements.length === 0) return;
+    const st = a.getAppState();
+    const saved = savedBackground(st.viewBackgroundColor, background.current);
+    const viewBackgroundColor = typeof saved === "string" ? saved : DEFAULT_BACKGROUND;
     const blob = await m.exportToBlob({
       elements,
       files: a.getFiles(),
-      appState: { ...a.getAppState(), exportBackground: true },
+      appState: { ...st, viewBackgroundColor, exportBackground: true, exportWithDarkMode: false },
       mimeType: "image/png",
       exportPadding: 16,
     });
@@ -270,6 +280,7 @@ export function App({ rooms }: { rooms: RoomsPlugin }) {
             await notes.startOver();
             version.current = 0;
             opsApplied.current = 0;
+            background.current = undefined;
             openKey.current = doc?.fileKey ?? null;
             boardOn.current = false;
             setView({ kind: "ready", scene: null, key: `${doc?.fileKey}-fresh`, board: false });
@@ -294,10 +305,11 @@ export function App({ rooms }: { rooms: RoomsPlugin }) {
     <div className="board">
       <Excalidraw
         key={view.key}
+        theme={scheme}
         excalidrawAPI={(a) => (api.current = a)}
         initialData={{
           elements: (view.scene?.elements ?? []) as never,
-          appState: { ...(view.scene?.appState ?? {}), theme: "light" },
+          appState: { ...(view.scene?.appState ?? {}), viewBackgroundColor: shownBackground(view.scene?.appState.viewBackgroundColor) },
           files: (view.scene?.files ?? {}) as never,
           scrollToContent: true,
         }}
