@@ -41,7 +41,7 @@ A notes file that can't be read is never overwritten: the panel asks before star
 
 ## Develop
 
-`@alto-rooms/plugin-sdk` will come from the `plugin-sdk-v0.7.0` release tarball after the SDK 0.7.0 release; until then `package.json` points at a local build of it. Requires Alto Rooms 0.7.1, which sends plugins its theme. The panel's own styles use the SDK's `--rooms-*` variables, each with a fallback for a page opened outside Rooms.
+`@alto-rooms/plugin-sdk` comes from the `plugin-sdk-v0.7.0` release tarball. Requires Alto Rooms 0.7.1, which sends plugins its theme. The panel's own styles use the SDK's `--rooms-*` variables, each with a fallback for a page opened outside Rooms.
 
 ```sh
 bun install
