@@ -1,6 +1,6 @@
 {
   "name": "rooms-plugin-excalidraw",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "Sketch next to any document with Excalidraw, as an Alto Rooms plugin.",
   "license": "MIT",
@@ -12,10 +12,10 @@
     "package": "bun run build && cd dist && zip -qr ../excalidraw.zip ."
   },
   "dependencies": {
-    "@alto-rooms/plugin-sdk": "https://github.com/alto-computer/alto-rooms/releases/download/plugin-sdk-v0.2.0/alto-rooms-plugin-sdk-0.2.0.tgz",
+    "@alto-rooms/plugin-sdk": "https://github.com/alto-computer/alto-rooms/releases/download/plugin-sdk-v0.7.0/alto-rooms-plugin-sdk-0.7.0.tgz",
+    "@excalidraw/excalidraw": "^0.18.1",
     "react": "^19.3.0",
-    "react-dom": "^19.3.0",
-    "@excalidraw/excalidraw": "^0.18.1"
+    "react-dom": "^19.3.0"
   },
   "devDependencies": {
     "@types/node": "^26.6.4",

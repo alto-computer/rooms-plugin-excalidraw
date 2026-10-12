@@ -5,17 +5,20 @@ body,
   margin: 0;
 }
 body {
-  font:
-    14px/1.45 system-ui,
-    -apple-system,
-    BlinkMacSystemFont,
-    sans-serif;
-  color: #1a1a1a;
-  background: #fff;
+  font: 14px/1.45 var(--rooms-font-sans, system-ui, -apple-system, BlinkMacSystemFont, sans-serif);
+  color: var(--rooms-text, #1a1a1a);
+  background: var(--rooms-bg, #fff);
 }
 .board,
 .blank {
   height: 100%;
+}
+/* The canvas is transparent (see background.ts): the pane colour behind it is the board's. Excalidraw's own bars sit on it as cards. */
+.board .excalidraw {
+  --island-bg-color: var(--rooms-card, #fff);
+}
+.board .excalidraw.theme--dark {
+  --island-bg-color: var(--rooms-card, #232329);
 }
 .warn {
   font: inherit;
@@ -23,10 +26,10 @@ body {
   height: 36px;
   padding: 0 10px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--rooms-radius, 8px);
   cursor: pointer;
-  background: #fbeceb;
-  color: #c4392b;
+  background: color-mix(in srgb, var(--rooms-error, #c4392b) 12%, transparent);
+  color: var(--rooms-error, #c4392b);
 }
 .message {
   padding: 16px;
@@ -36,20 +39,21 @@ body {
   margin: 0 0 4px;
 }
 .muted {
-  color: #8a8a8a;
+  color: var(--rooms-text-muted, #8a8a8a);
   margin: 4px 0;
 }
 .message button {
   margin-top: 8px;
   font: inherit;
-  background: none;
-  border: 1px solid #e6e6e6;
-  border-radius: 8px;
+  color: inherit;
+  background: var(--rooms-surface, none);
+  border: 1px solid var(--rooms-border-strong, #e6e6e6);
+  border-radius: var(--rooms-radius, 8px);
   padding: 6px 12px;
   cursor: pointer;
 }
 .message button:hover {
-  background: #efefef;
+  background: var(--rooms-surface-strong, #efefef);
 }
 .drawing {
   display: inline-flex;
@@ -57,10 +61,10 @@ body {
   height: 36px;
   padding: 0 10px;
   margin-right: 6px;
-  border-radius: 8px;
+  border-radius: var(--rooms-radius, 8px);
   font-size: 13px;
-  background: #eef3fd;
-  color: #3a63c8;
+  background: color-mix(in srgb, var(--rooms-accent, #3a63c8) 12%, transparent);
+  color: var(--rooms-accent, #3a63c8);
 }
 /* Stands in for the board until something is drawn, so an empty document never loads Excalidraw. */
 .start {
@@ -72,10 +76,10 @@ body {
   border: 0;
   padding: 0;
   font: inherit;
-  color: #8a8a8a;
-  background: #fff;
+  color: var(--rooms-text-faint, #8a8a8a);
+  background: var(--rooms-bg, #fff);
   cursor: crosshair;
 }
 .start:hover span {
-  color: #1a1a1a;
+  color: var(--rooms-text, #1a1a1a);
 }

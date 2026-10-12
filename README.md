@@ -2,13 +2,14 @@
 
 Sketch next to any document in [Alto Rooms](https://github.com/alto-computer/alto-rooms) with [Excalidraw](https://github.com/excalidraw/excalidraw), or let an agent draw there. Notes stay with the document and export as PNG.
 
-Excalidraw notes ships with Alto Rooms 0.4.0 and later; agents can draw from Alto Rooms 0.5.0. It is on by default; right-click it in the sidebar to turn it off.
+Excalidraw notes ships with Alto Rooms 0.4.0 and later; agents can draw from Alto Rooms 0.5.0, and the panel follows the app's theme from 0.7.1. It is on by default; right-click it in the sidebar to turn it off.
 
 ## Use
 
 - Open a document and click **Notes** at its top right. The panel opens beside the document; drag its edge to resize.
 - Everything you draw saves as you go.
-- **Export PNG** is in the menu (☰).
+- **Export PNG** is in the menu (☰). The PNG keeps the drawing's own background, white unless you chose one, whatever the app's theme.
+- The panel follows the app's light or dark theme. A drawing on the default background shows on the app's pane colour.
 
 ## Let an agent draw
 
@@ -40,7 +41,7 @@ A notes file that can't be read is never overwritten: the panel asks before star
 
 ## Develop
 
-`@alto-rooms/plugin-sdk` comes from the `plugin-sdk-v0.2.0` release tarball. Requires Alto Rooms 0.5.0.
+`@alto-rooms/plugin-sdk` comes from the `plugin-sdk-v0.7.0` release tarball. Requires Alto Rooms 0.7.1, which sends plugins its theme. The panel's own styles use the SDK's `--rooms-*` variables, each with a fallback for a page opened outside Rooms.
 
 ```sh
 bun install
